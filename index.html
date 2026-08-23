@@ -148,7 +148,7 @@
     font-size: 18px;
     font-weight: 700;
     border-radius: 50px;
-    transition: transform 0.25s ease, left 0.28s cubic-bezier(.34,1.56,.64,1), top 0.28s cubic-bezier(.34,1.56,.64,1), box-shadow 0.2s ease;
+    transition: transform 0.25s ease, box-shadow 0.2s ease;
     box-shadow: 0 10px 24px rgba(214, 51, 132, 0.3);
   }
 
@@ -170,7 +170,12 @@
   }
   #noBtn.escaped{
     position: fixed;
+    left: 0;
+    top: 0;
+    margin: 0;
     z-index: 50;
+    will-change: transform;
+    transition: none;
   }
 
   .hint{
@@ -349,14 +354,28 @@
     heartsContainer.appendChild(el);
   }
 
-  // ---------- NO button dodges ----------
+  // ---------- NO button: continuous smooth flee animation ----------
   const noBtn = document.getElementById('noBtn');
   const yesBtn = document.getElementById('yesBtn');
   const hintText = document.getElementById('hintText');
-  const DODGE_DISTANCE = 110;
-  const PAD = 16;
-  let dodgeCount = 0;
-  let yesScale = 1;
+
+  const SAFE_RADIUS = 170;     // pointer distance at which it starts fleeing
+  const CLOSE_CALL_DIST = 95;  // pointer distance that counts as a "close call"
+  const PAD = 16;              // keep-away margin from viewport edges
+  const EDGE_MARGIN = 80;      // distance from edge where wall-avoidance kicks in
+  const MAX_SPEED = 3.4;       // px per frame — keeps the motion slow & smooth
+  const FLEE_ACCEL = 0.85;
+  const IDLE_ACCEL = 0.045;
+  const EDGE_ACCEL = 0.7;
+  const DAMPING = 0.9;
+
+  let started = false;
+  let noX = 0, noY = 0, noVX = 0, noVY = 0;
+  let noW = 0, noH = 0;
+  let pointerX = null, pointerY = null;
+  let wanderAngle = Math.random() * Math.PI * 2;
+  let closeCallCount = 0;
+  let lastCloseCallAt = 0;
 
   const messages = [
     "Oops, try again 😅",
@@ -369,67 +388,119 @@
     "This button has left the chat 🏃‍♀️",
   ];
 
-  function moveNoButton(clientX, clientY){
-    noBtn.classList.add('escaped');
-    const rect = noBtn.getBoundingClientRect();
-    const w = rect.width || 100;
-    const h = rect.height || 50;
-    const maxX = Math.max(PAD, window.innerWidth - w - PAD);
-    const maxY = Math.max(PAD, window.innerHeight - h - PAD);
+  function registerCloseCall(){
+    const now = performance.now();
+    if (now - lastCloseCallAt < 1400) return;
+    lastCloseCallAt = now;
+    closeCallCount++;
 
-    let newX, newY, tries = 0;
-    do {
-      newX = PAD + Math.random() * (maxX - PAD);
-      newY = PAD + Math.random() * (maxY - PAD);
-      tries++;
-    } while (
-      typeof clientX === 'number' &&
-      Math.hypot((newX + w/2) - clientX, (newY + h/2) - clientY) < DODGE_DISTANCE &&
-      tries < 12
-    );
-
-    noBtn.style.left = newX + 'px';
-    noBtn.style.top = newY + 'px';
-
-    dodgeCount++;
     hintText.style.opacity = 0;
     setTimeout(() => {
-      hintText.textContent = messages[Math.min(dodgeCount - 1, messages.length - 1)];
+      hintText.textContent = messages[Math.min(closeCallCount - 1, messages.length - 1)];
       hintText.style.opacity = 1;
     }, 120);
 
-    yesScale = Math.min(1.35, 1 + dodgeCount * 0.03);
+    const yesScale = Math.min(1.35, 1 + closeCallCount * 0.03);
     yesBtn.style.transform = `scale(${yesScale})`;
   }
 
-  function distanceToRect(x, y, rect){
+  function startFleeing(){
+    if (started) return;
+    started = true;
+    const rect = noBtn.getBoundingClientRect();
+    noW = rect.width;
+    noH = rect.height;
+    noX = rect.left;
+    noY = rect.top;
+    noBtn.classList.add('escaped');
+    noBtn.style.transform = `translate(${noX}px, ${noY}px)`;
+    requestAnimationFrame(tick);
+  }
+
+  function tick(){
+    const maxX = Math.max(PAD, window.innerWidth - noW - PAD);
+    const maxY = Math.max(PAD, window.innerHeight - noH - PAD);
+    let ax = 0, ay = 0;
+
+    if (pointerX !== null){
+      const cx = noX + noW / 2, cy = noY + noH / 2;
+      const dx = cx - pointerX, dy = cy - pointerY;
+      const d = Math.hypot(dx, dy) || 0.0001;
+      if (d < SAFE_RADIUS){
+        const urgency = 1 - d / SAFE_RADIUS;
+        ax += (dx / d) * FLEE_ACCEL * (0.4 + urgency);
+        ay += (dy / d) * FLEE_ACCEL * (0.4 + urgency);
+        if (d < CLOSE_CALL_DIST) registerCloseCall();
+      } else {
+        wanderAngle += (Math.random() - 0.5) * 0.15;
+        ax += Math.cos(wanderAngle) * IDLE_ACCEL;
+        ay += Math.sin(wanderAngle) * IDLE_ACCEL;
+      }
+    } else {
+      wanderAngle += (Math.random() - 0.5) * 0.15;
+      ax += Math.cos(wanderAngle) * IDLE_ACCEL;
+      ay += Math.sin(wanderAngle) * IDLE_ACCEL;
+    }
+
+    // gently steer away from the nearest edge so it can't get cornered
+    if (noX < EDGE_MARGIN) ax += EDGE_ACCEL * (1 - noX / EDGE_MARGIN);
+    if (noX > maxX - EDGE_MARGIN) ax -= EDGE_ACCEL * (1 - (maxX - noX) / EDGE_MARGIN);
+    if (noY < EDGE_MARGIN) ay += EDGE_ACCEL * (1 - noY / EDGE_MARGIN);
+    if (noY > maxY - EDGE_MARGIN) ay -= EDGE_ACCEL * (1 - (maxY - noY) / EDGE_MARGIN);
+
+    noVX = (noVX + ax) * DAMPING;
+    noVY = (noVY + ay) * DAMPING;
+    const speed = Math.hypot(noVX, noVY);
+    if (speed > MAX_SPEED){
+      noVX = (noVX / speed) * MAX_SPEED;
+      noVY = (noVY / speed) * MAX_SPEED;
+    }
+
+    noX += noVX;
+    noY += noVY;
+
+    if (noX < PAD){ noX = PAD; noVX = Math.max(noVX, 0); }
+    if (noX > maxX){ noX = maxX; noVX = Math.min(noVX, 0); }
+    if (noY < PAD){ noY = PAD; noVY = Math.max(noVY, 0); }
+    if (noY > maxY){ noY = maxY; noVY = Math.min(noVY, 0); }
+
+    noBtn.style.transform = `translate(${noX}px, ${noY}px)`;
+    requestAnimationFrame(tick);
+  }
+
+  function distanceToBtnRect(x, y){
+    const rect = noBtn.getBoundingClientRect();
     const dx = Math.max(rect.left - x, 0, x - rect.right);
     const dy = Math.max(rect.top - y, 0, y - rect.bottom);
     return Math.hypot(dx, dy);
   }
 
   function handlePointerMove(x, y){
-    const rect = noBtn.getBoundingClientRect();
-    if (distanceToRect(x, y, rect) < DODGE_DISTANCE){
-      moveNoButton(x, y);
+    pointerX = x;
+    pointerY = y;
+    if (!started && distanceToBtnRect(x, y) < SAFE_RADIUS){
+      startFleeing();
     }
   }
 
   document.addEventListener('mousemove', (e) => handlePointerMove(e.clientX, e.clientY));
+  document.addEventListener('mouseleave', () => { pointerX = null; pointerY = null; });
   document.addEventListener('touchmove', (e) => {
     const t = e.touches[0];
     if (t) handlePointerMove(t.clientX, t.clientY);
   }, { passive: true });
+  document.addEventListener('touchend', () => { pointerX = null; pointerY = null; });
 
-  // Fallback: if it somehow gets clicked/tapped, just dodge again — never accept "no"
+  // Fallback: if it somehow gets clicked/tapped, treat it as a close call and keep fleeing
   noBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    moveNoButton(e.clientX, e.clientY);
+    startFleeing();
+    registerCloseCall();
   });
   noBtn.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    const t = e.touches[0];
-    moveNoButton(t ? t.clientX : undefined, t ? t.clientY : undefined);
+    startFleeing();
+    registerCloseCall();
   }, { passive: false });
 
   // ---------- Screen navigation ----------
