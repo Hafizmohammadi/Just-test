@@ -14,7 +14,7 @@ npx serve truemile      # or: python3 -m http.server -d truemile
 
 The game saves itself in the browser's `localStorage`.
 
-Run the engine tests with `node --test truemile/tests/`.
+Run the engine tests with `node --test 'truemile/tests/*.test.js'`.
 
 ## What's inside
 

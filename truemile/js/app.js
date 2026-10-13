@@ -191,7 +191,7 @@
         }
         t.driverId = null; return { ok: true };
       });
-      case 'sell': if (!confirm('Dispose of this truck? This cannot be undone.')) return; return step(function (st) { return TM.sellTruck(st, d.truck); });
+      case 'sell': if (!d.ok) return ask('Dispose of this truck? This cannot be undone.', 'Dispose', el); return step(function (st) { return TM.sellTruck(st, d.truck); });
       case 'dispatcher-on': return step(function (st) { st.settings.ops.dispatcherPct = +document.getElementById('disp-pct').value || 7; st.dispatcher = true; TM.log(st, 'info', 'Dispatcher hired', st.settings.ops.dispatcherPct + '% of gross revenue.'); st.boardDay = -1; TM.refreshBoards(st); return { ok: true }; });
       case 'dispatcher-off': return step(function (st) { st.dispatcher = false; st.settings.ops.dispatcherPct = 0; TM.log(st, 'info', 'Dispatcher let go', ''); return { ok: true }; });
       case 'factoring-on': return step(function (st) { st.settings.ops.factoringPct = +document.getElementById('fact-pct').value || 3; st.settings.ops.factoring = true; TM.log(st, 'info', 'Factoring started', 'Future invoices are sold for cash at delivery.'); return { ok: true }; });
@@ -208,14 +208,14 @@
       });
       case 'start-game': {
         stopAuto();
-        if (app.state && !confirm('Start a new simulation? The current game will be replaced.')) return;
+        if (app.state && !d.ok) return ask('Start a new simulation? The current game will be replaced.', 'Start new game', el);
         var exps = app.expList();
         var st = TM.newGame(app.draft, { expenses: exps });
         if (app.draft.startWithCredit) { TM.openCredit(st); }
         app.state = st; app.draftExp = null; app.view = 'dashboard'; app.selTruck = null;
         save(); render(); window.scrollTo(0, 0); return;
       }
-      case 'reset-draft': if (!confirm('Reset all setup values to the example scenario?')) return; app.draft = TM.defaultSettings(); app.draft.homeCity = 'DAL'; save(); render(); return;
+      case 'reset-draft': if (!d.ok) return ask('Reset all setup values to the example scenario?', 'Reset', el); app.draft = TM.defaultSettings(); app.draft.homeCity = 'DAL'; save(); render(); return;
       case 'add-partner': app.draft.partners.push({ id: 'p' + (Date.now() % 100000), name: 'Partner ' + String.fromCharCode(65 + app.draft.partners.length), pct: 0, capital: 0, drives: false }); save(); render(); return;
       case 'del-partner': app.draft.partners.splice(+d.i, 1); save(); render(); return;
       case 'fund-gap': {
@@ -224,7 +224,7 @@
         save(); render(); return;
       }
       case 'exp-reset':
-        if (!confirm('Reset every expense to its default amount and on/off state?')) return;
+        if (!d.ok) return ask('Reset every expense to its default amount and on/off state?', 'Reset expenses', el);
         if (app.state) app.state.expenses = TM.clone(TM.EXPENSES); else app.draftExp = TM.clone(TM.EXPENSES);
         save(); render(); return;
       case 'exp-del': {
@@ -244,6 +244,12 @@
       }
     }
   }
+  // In-page confirmation (browser confirm() dialogs are blocked in some viewers).
+  function ask(text, yes, el) {
+    var attrs = Object.keys(el.dataset).map(function (k) { return 'data-' + k.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); }) + '="' + UI.esc(el.dataset[k]) + '"'; }).join(' ');
+    app.modalHtml = '<h2>Are you sure?</h2><p>' + UI.esc(text) + '</p><div class="row"><button class="btn danger" ' + attrs + ' data-ok="1">' + UI.esc(yes) + '</button></div>';
+    render();
+  }
   function truck(st, id) { return st.trucks.filter(function (t) { return t.id === id; })[0]; }
 
   function onClick(e) {
@@ -251,6 +257,7 @@
     if (!el) return;
     if (el.tagName === 'SELECT' || el.tagName === 'INPUT') return;
     if (el.dataset.action === 'close-modal' && el.classList.contains('modal-bg') && e.target !== el) return;
+    if (el.dataset.ok) { app.modalHtml = null; }
     act(el.dataset.action, el);
   }
 
